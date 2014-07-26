@@ -1,0 +1,107 @@
+---
+title: "Practical Machine Learning Project"
+author: "Antonio González Huete"
+date: "26/07/2014"
+output: html_document
+---
+
+The first thing that we need to do in a machine learning approach it is to analize the accesible data. This way we can select the relevant features that will allow us to inference the desired output. For that we first will load the data from the file:
+```{r}
+  pmlTraining <- read.csv(file="/home/antonio/Descargas/Johns Hopkins - Practical Machine Learning/Assigments/pml-training.csv", head=TRUE, sep=",", na.strings=c("#DIV/0!",NA))
+  pmlTesting  <- read.csv(file="/home/antonio/Descargas/Johns Hopkins - Practical Machine Learning/Assigments/pml-testing.csv" , head=TRUE, sep=",", na.strings=c("#DIV/0!",NA) )
+```
+
+In the actual case, we can see that the number of invalid data (or not available data) is much bigger than the relevant data:
+```{r}
+sum( colSums( is.na(pmlTraining)) ) / sum( colSums( !is.na(pmlTraining)) )
+```
+
+For that reason, one logical step is to eliminate the irrelevant data to facilitate the inference process:
+  Removing the columns with a determined porcentage of NA (in this case superior to the 0.0%):
+```{r}
+    pmlTrainingSet <- pmlTraining[ , colSums( is.na(pmlTraining)) <= nrow(pmlTraining)*0.0]
+    pmlTestingSet  <- pmlTesting [ , colSums( is.na(pmlTraining)) <= nrow(pmlTraining)*0.0]
+```
+  Removing the first column for being the index:
+```{r}
+    pmlTrainingSet <- pmlTrainingSet[, -1]
+    pmlTestingSet  <- pmlTestingSet [, -1]
+```
+  And in this particular case removing non numeric features (names, etc), but previously we will store the output fields for later:
+```{r}
+    pmlTrainingClass <- factor(pmlTrainingSet$classe)
+    pmlTestingId     <- pmlTestingSet$problem_id
+    pmlTrainingSet   <- pmlTrainingSet[ , sapply(pmlTrainingSet, is.numeric)==TRUE]
+    pmlTestingSet    <- pmlTestingSet [ , sapply(pmlTrainingSet, is.numeric)==TRUE]
+```
+  And in the final validation set, we will select only the features selected for the training:
+```{r}
+    pmlTestingSet  <- pmlTestingSet [ , which(names(pmlTestingSet) %in% names(pmlTrainingSet))]
+```
+
+At this point we have already reduced the number of fields to the most relevant ones. At this point one could train the system directly, but in my case and due to the configuration of my system, a directly training over the remaining fields did give to me an "out of memory". Due by that, I decided to perform a dimensional reduction using PCA (in this case not for increment the accuracy, it was for computational efficency):
+```{r}
+  library(caret)
+  pre <- preProcess(pmlTrainingSet, method="pca", thres=0.95)
+  pmlTrainingSet <- predict(pre, pmlTrainingSet)
+  pmlTestingSet  <- predict(pre, pmlTestingSet )
+```
+
+Finally, we end with a very reduced training set, having a final dimension of:
+```{r, echo=FALSE}
+  dim(pmlTrainingSet)
+```
+from the original dimension:
+```{r, echo=FALSE}
+  dim(pmlTraining)
+```
+
+Now we are in a position of train the system, so we add the output fields to the data sets, and we perform a partition over the training set to avoid overfiting, and to get an unbiased evaluation of our predictor:
+```{r}
+  pmlTrainingSet$classe    <- pmlTrainingClass
+  pmlTestingSet$problem_id <- pmlTestingId
+  inTrain  <- createDataPartition(y=pmlTrainingSet$classe, p=0.75, list=FALSE)
+  trainSet <- pmlTrainingSet[ inTrain, ]
+  testSet  <- pmlTrainingSet[-inTrain, ]
+```
+
+Now, before we select a method for train the system, we give a look over the data and visualize it with respect the first two principal components (the two components that gives the most amount of information):
+```{r, echo=FALSE}
+  qplot(testSet$PC1, testSet$PC2, col=classe, data=testSet)
+```
+
+It clearly shows a high non-lineality nature for this problem, which means that we will need a non-linear method to reach good results. And with that, we select to use a random forest method for various reasons:
+  First and most important, by be a non-linear method.
+  Second because it have implicit a bootstrap method.
+  And third because it have demostrated to be one of the most powerfull classifiers seen in the course.
+
+Then, finally we train the system with a random forest:
+```{r}
+    set.seed(123456)
+    m <- train(classe ~ ., data=trainSet, method="rf")
+```
+  
+Once the system have been trained, we need to evaluate it with an unknown data (the test cases):
+```{r}
+  predictions <- predict(m, newdata=testSet)
+```
+
+As we can see in the following results, we have an accuracy over the 97% in the test set, which it is a very good one:
+```{r, echo=FALSE}
+  confusionMatrix(predictions, testSet$classe)
+```
+
+And for a last validation of that we have done all right, we plot the missed cases:
+```{r, echo=FALSE}
+  testSet$predRight <- predictions==testSet$classe
+  qplot(testSet$PC1, testSet$PC2, col=predRight, data=testSet)
+```
+Which shows that clearly we really have inferred the results in a good way, we have only a very few missed values that are not concentrated in the same area, and which with much probability it will be produced by an lack or excess of learning (it is probable that refining a little more the selected features, this missed cases could be avoid).
+
+With that, we could evaluate the final validation test set, where we obtaining only one error from the total 20 cases:
+  answers  <- predict(m, newdata=pmlTestingSet)
+```{r, echo=FALSE}
+answers
+```
+  
+
